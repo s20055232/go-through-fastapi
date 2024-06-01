@@ -107,4 +107,97 @@ def read_user(user_id: int):
 今天如果使用 `/users/me` 是可以正常使用的，因為會先匹配到上面的程式碼，但反過來的話，你永遠都只會匹配到 `/users/{user_id}`，導致你永遠不能成為一個酷男孩了。
 
 ## Day3
-continue
+
+### Predifined Values
+
+在接收 path parameter 的時候，除了像 ID 這種我們輸入較為隨機的情況，也有輸入的可能性我們已知的情況，對於這種固定選項的輸入，我們可以使用 `Enum`
+
+```python
+from enum import Enum
+
+from fastapi import FastAPI
+
+class CustomerName(Enum):
+    allen = "allen"
+    sunny = "sunny"
+    eric = "eric"
+
+
+app = FastAPI()
+
+
+@app.get("/customers/{customer_name}")
+async def get_model(customer_name: CustomerName):
+    if customer_name is CustomerName.allen:
+        return {"customer_name": customer_name, "message": "Welcome our Cool Boy!"}
+
+    if model_name.value == "sunny":
+        return {"customer_name": customer_name, "message": "Sunny is the best!"}
+
+    return {"customer_name": customer_name, "message": "Welcome!"}
+```
+
+看程式碼可以得知繼承 `Enum` 之後我們可以直接透過使用屬性來匹配，也可以呼叫 `.value()` 來得知值為何。
+
+但回傳的時候，我們不需要使用屬性或 `.value()` 來取得值，可以直接回傳，FastAPI 會自動幫你處理，相當方便。
+
+這邊比較有趣的是，`customer_name is CustomerName.allen` 這一段，這代表資料傳進來並被轉換成 `Enum` 的值之後，他的記憶體空間將會直接指向 `Enum` 的屬性，而不是複製一份值，這個就要說到 Python 的內部機制稱為「String Interning」。
+
+### String Interning
+
+這是一種記憶體最佳化策略，Python 對於靜態的字串，也就是 Literal String 的部分，Python 高機率會將這個字串「駐留」，當未來再次遇到相同的字串的時候，會使用過去已建立的物件，而不是建立一個新的。
+
+```python
+print("a" is "a") # True
+```
+
+但對於動態生成的字串，像是字串串接、切片，Python 則較低機率會將它駐留。
+
+```python
+a = "a" + "b"
+print(a is "ab") # True
+
+b = "Cool" + "Boy"
+print(b is "Cool Boy") # False
+
+c = b[:4]
+print(c is "Cool") # False
+```
+
+但有趣的是，若是 dict 的 key，Python 會自動將該字串駐留
+
+```python
+d = {"Cool Boy": 1, "Best Girl": 2}
+e = "Cool Boy"
+
+print(e is "Cool Boy")
+```
+
+當然，你也可以手動將字串駐留
+
+```python
+import sys
+
+a = "hello"
+d = sys.intern("".join(["he", "llo"]))
+print(a is d)  # True
+```
+
+使用駐留對於處理大量的重複字串可以帶來顯著的效率提升，寫程式的時候不妨試試。
+
+### Path parameters containing paths
+
+當今天我們的 route 想要直接接收檔案的路徑的時候，雖然可以用之前學的寫法，但 OpenAPI 目前沒有支援，所以會導致我們不能善用 API documentation 進行測試跟定義，因此為了兼容 OpenAPI，我們要稍微調整一下寫法。
+
+```python
+from fastapi import FastAPI
+
+app = FastAPI()
+
+
+@app.get("/files/{file_path:path}")
+async def read_file(file_path: str):
+    return {"file_path": file_path}
+```
+
+透過對 file_path 這個 path parameter 進行型態標注，並標注其為 `path`，讓 FastAPI 知道我們將預期接受到完整的路徑（例：/files/a/b/c/README.md）。

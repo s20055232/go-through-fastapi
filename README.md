@@ -25,28 +25,26 @@ Asynchronous Server Gateway Interface，簡單來說是 WSGI 的進化版，支�
 而上述那種跑到一半可以去做別的事情的，跳著執行的，稱為「非同步」。
 接著說明 concurrent 跟 parallel，很多人會搞混的地方，我喜歡從 Rod Pile 說過的話來幫助我理解
 
-```
-Concurrency is about dealing with lots of things at once.
+>Concurrency is about dealing with lots of things at once.
+>
+>Parallelism is about doing lots of things at once.
+>
+>Not the same, but related.
+>
+>Concurrency is about structure, parallelism is about execution.
+>
+>Concurrency provides a way to structure a solution to solve a problem that may (but not necessarily) be parallelizable.
+>
+>   — Rob Pike
 
-Parallelism is about doing lots of things at once.
-
-Not the same, but related.
-
-Concurrency is about structure, parallelism is about execution.
-
-Concurrency provides a way to structure a solution to solve a problem that may (but not necessarily) be parallelizable.
-
-    — Rob Pike
-```
 
 簡單來說，concurrent 是透過排程，來讓多個工作看似同時進行，但實際上可能不是同時執行，舉例來說，老闆可能會給你 5 個任務要你完成，而你會將工作排優先順序，然後執行，如果一個工作卡住了，那你就先做另一個，但所有工作都有所進展，沒有哪個完全停擺。
 而 parallel 則是指這些工作真的都在同時運行，繼續剛剛的例子，老闆把五個工作交給五個人，大家都拿到一個工作，各司其職，不分心的專心處理，全部工作都同時間進行著。
 
 我喜歡他的一句總結
 
-```
-Modern versions of Python have support for "asynchronous code" using something called "coroutines", with async and await syntax.
-```
+
+> Modern versions of Python have support for "asynchronous code" using something called "coroutines", with async and await syntax.
 
 一語道破這些關鍵字的概念為何。
 
@@ -60,7 +58,9 @@ FastAPI 提供有趣的指令來運行服務，運行後會看到有趣的畫面
 - fastapi dev: 測試用
 - fastapi run: 部署用
 
-來看程式碼，相當簡單，創建一個 web app 物件，然後為這個 web app 添加 root 的 route，並定義觸發該 route 的 operation 是 get，接著回傳一個 dict。
+不過這邊就不多說明。
+
+回頭來看程式碼，相當簡單，創建一個 web app 物件，然後為這個 web app 添加 root 的 route，並定義觸發該 route 的 operation 是 get，接著回傳一個 dict。
 
 這邊有趣的是你回傳的資料結構 FastAPI 會自行幫你轉換成 JSON 回傳，非常貼心，其餘的跟其他 Python 網頁框架差不多，所以應該很好理解。
 
@@ -75,7 +75,7 @@ async def root():
     return {"message": "Hello World"}
 ```
 
-接著來看怎麼使用 path parameters，FastAPI 也提供的用法也很簡單，我們直接看 code
+接著來看怎麼使用 path parameters，FastAPI 也提供的用法也很簡單，我們直接看 code。
 
 ```python
 from fastapi import FastAPI
@@ -92,7 +92,7 @@ async def root(item_id: int):
 
 有趣的是，你在函數簽章進行 type annotation 是有意義的，FastAPI 會幫你在解析出 path parameter 後嘗試進行 data validation，看資料符不符合你定義的資料型態，如果不行的話就會出錯。
 
-route 定義的順序是有關係的，匹配的順序是從上到下，直接看 code
+route 定義的順序是有關係的，匹配的順序是從上到下，直接看 code。
 
 ```python
 @app.get("/users/me")
@@ -200,7 +200,7 @@ async def read_file(file_path: str):
     return {"file_path": file_path}
 ```
 
-透過對 file_path 這個 path parameter 進行型態標注，並標注其為 `path`，讓 FastAPI 知道我們將預期接受到完整的路徑（例：/files/a/b/c/README.md）。
+透過對 file_path 這個 path parameter 進行型態標注，並標注其為 `path`，讓 FastAPI 知道我們將預期接受到完整的路徑（例：`files/a/b/c/README.md`）。
 
 ## Day4
 
@@ -267,7 +267,7 @@ async def update_item(item_id: int, item: Item, q: Annotated[str | None, Query()
 
 當資料傳遞進來時，FastAPI 會幫我們將資料嘗試用 data class 去轉換並實例化它，我們後續的操作可以直接操作這個 data class 相當方便。
 
-這邊要留意 path parameter、query parameter、request body 的混用，如果變數名稱有定義在 route 上，那就是 path parameter，如果資料是 pydantic model，那就會視為 request body，其餘的資料則視為 query parameter，但如果你都有使用 Annotated 去明確的描述，那理論上你不知道這一點也還好。
+這邊要留意 path parameter、query parameter、request body 的混用，如果變數名稱有定義在 route 上，那就是 path parameter，如果資料是 pydantic model，那就會視為 request body，其餘的資料則視為 query parameter，但如果你都有使用 `Annotated` 去明確的描述，那理論上你不知道這一點也還好。
 
 ### Annotated
 
@@ -296,7 +296,7 @@ async def read_items(q: Annotated[str | None, Query(max_length=50)] = None):
 
 除此之外還有很多可以設定的，長度、數值大小、title、description、examples 等等，這邊就不一一舉例。
 
-也不只有 `Query()` 可以用，還有 `Path()`、`Body()`、`Cookie()` 可以使用，相當方便，個人建議撰寫 API 時都記得使用 Annotated 把所有東西都定義的明確一點。
+也不只有 `Query()` 可以用，還有 `Path()`、`Body()`、`Cookie()` 可以使用，相當方便，個人建議撰寫 API 時都記得使用 `Annotated` 把所有東西都定義的明確一點。
 
 ### Multiple Parameters
 
@@ -318,7 +318,7 @@ async def read_items(q: Annotated[str | None, Query(max_length=50)] = None):
 }
 ```
 
-我們可以用兩個 data class 去描述，一個 data class 去描述一個 key 所對應的資料，剩下的則直接用一個參數去接，記得要使用 Annotated，不然會被視為 query parameter。
+我們可以用兩個 data class 去描述，一個 data class 去描述一個 key 所對應的資料，剩下的則直接用一個參數去接，記得要使用 `Annotated`，不然會被視為 query parameter。
 
 ```python
 from fastapi import FastAPI
@@ -427,7 +427,7 @@ async def update_item(item_id: int, item: Annotated[Item, Body(embed=True)]):
 
 前面已經寫了很多，程式碼方面是定義的清清楚楚，工程師相當快樂，也把 OpenAPI 的網址傳給別人要別人試試看，結果使用者根本不知道怎麼使用，因為沒有範例，我們來看怎麼添加範例。
 
-先來看 pydantic model 怎麼添加，我們透過設定 model_config 這個屬性，並設定其 json_schema_extra 屬性中的 examples 來達成。
+先來看 pydantic model 怎麼添加，我們透過設定 `model_config` 這個屬性，並設定其 `json_schema_extra` 屬性中的 `examples` 來達成。
 
 ```python
 class Item(BaseModel):

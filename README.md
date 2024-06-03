@@ -202,7 +202,7 @@ async def read_file(file_path: str):
 
 透過對 file_path 這個 path parameter 進行型態標注，並標注其為 `path`，讓 FastAPI 知道我們將預期接受到完整的路徑（例：/files/a/b/c/README.md）。
 
-### Day4
+## Day4
 
 ### Query Parameters
 
@@ -525,3 +525,7 @@ async def update_item(
 ):
 ...
 ```
+
+## Day5
+https://fastapi.tiangolo.com/tutorial/extra-data-types/
+continue

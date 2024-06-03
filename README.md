@@ -4,7 +4,7 @@
 ## Day1
 
 ### 環境
-使用 devcontainer 作為程式碼開發環境，用 poetry 進行套件管理，程式碼風格使用 ruff。
+使用 [devcontainer](https://code.visualstudio.com/docs/devcontainers/containers) 作為程式碼開發環境，用 [poetry](https://python-poetry.org/) 進行套件管理，程式碼風格使用 [ruff](https://github.com/astral-sh/ruff)。
 
 ### 簡介
 現代、好用、速度快，基於 Statlatte 這個 ASGI 網頁框架來作為其非同步的基底，以及 pydantic 用於資料驗證，還支援 OpenAPI 的整合，總之就是讚。

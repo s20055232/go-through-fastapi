@@ -1,5 +1,5 @@
 # 30 days learning FastAPI from scrach
-無聊開始的 30 天重新學習 FastAPI
+無聊開始的 30 天重新學習 FastAPI，這份筆記主要紀錄自己看到什麼有趣跟之前沒注意到的，簡單來說是寫給自己看的，可能不會描述的那麼清楚，閱讀時請搭配官方文件一起看。
 
 ## Day1
 
@@ -201,3 +201,327 @@ async def read_file(file_path: str):
 ```
 
 透過對 file_path 這個 path parameter 進行型態標注，並標注其為 `path`，讓 FastAPI 知道我們將預期接受到完整的路徑（例：/files/a/b/c/README.md）。
+
+### Day4
+
+### Query Parameters
+
+除了接受參數以外，我們還可以接受篩選的條件
+
+```
+http://127.0.0.1:8000/items/?skip=0&limit=10
+```
+
+這邊的篩選條件就是 `skip=0` 跟 `limit=10`，至於怎麼獲取這些資料，有幾種寫法，但我喜歡比較 explicitly 的作法，可以這麼寫
+
+```python
+from typing import Annotated
+from fastapi import FastAPI, Query
+
+app = FastAPI()
+
+
+@app.get("/items/{item_id}")
+async def read_user_item(
+    item_id: str, 
+    skip: Annotated[int, Query()] = 0,
+    limit: Annotated[int | None, Query()] = None
+):
+    item = {"item_id": item_id, "needy": needy, "skip": skip, "limit": limit}
+    return item
+
+```
+
+除了定義為 path parameter 以外的都會被視為 query paramenter，對於 query paramenter 可以透過 Annotated 去明確定義這個參數是什麼類型，第一個描述的是 data type，第二個描述的是種類。
+
+### Request Body
+
+當使用者傳遞給我們的 Request 包含資料，這些資料就是 Request Body，通常會出現在 `POST`、`DELETE`、`PUT` 這些 path operation，而不會出現在 `GET`。
+
+對於使用者傳遞進來的資料我們當然不可能照單全收，而且理論上資料格式是 server-side 定義的，對於這類資料，我們可以用 data class 去描述它。
+
+```python
+from typing import Annotated
+
+from fastapi import FastAPI, Query
+from pydantic import BaseModel
+
+
+class Item(BaseModel):
+    name: str
+    description: str | None = None
+    price: float
+    tax: float | None = None
+
+
+app = FastAPI()
+
+
+@app.put("/items/{item_id}")
+async def update_item(item_id: int, item: Item, q: Annotated[str | None, Query()] = None):
+    result = {"item_id": item_id, **item.dict()}
+    if q:
+        result.update({"q": q})
+    return result
+```
+
+當資料傳遞進來時，FastAPI 會幫我們將資料嘗試用 data class 去轉換並實例化它，我們後續的操作可以直接操作這個 data class 相當方便。
+
+這邊要留意 path parameter、query parameter、request body 的混用，如果變數名稱有定義在 route 上，那就是 path parameter，如果資料是 pydantic model，那就會視為 request body，其餘的資料則視為 query parameter，但如果你都有使用 Annotated 去明確的描述，那理論上你不知道這一點也還好。
+
+### Annotated
+
+官方文件是這麼說明的
+
+> Special typing form to add context-specific metadata to an annotation.
+
+總之可以為 type 添加 metadata，在 FastAPI 中，這些 metadata 除了描述之外，還可以用來驗證，以下面的例子來說，我們可以限制資料的長度
+
+```python
+from typing import Annotated
+
+from fastapi import FastAPI, Query
+
+app = FastAPI()
+
+
+@app.get("/items/")
+async def read_items(q: Annotated[str | None, Query(max_length=50)] = None):
+    results = {"items": [{"item_id": "Foo"}, {"item_id": "Bar"}]}
+    if q:
+        results.update({"q": q})
+    return results
+
+```
+
+除此之外還有很多可以設定的，長度、數值大小、title、description、examples 等等，這邊就不一一舉例。
+
+也不只有 `Query()` 可以用，還有 `Path()`、`Body()`、`Cookie()` 可以使用，相當方便，個人建議撰寫 API 時都記得使用 Annotated 把所有東西都定義的明確一點。
+
+### Multiple Parameters
+
+前面有提到使用一個 data class 去描述傳入的資料，但其實也不限於一個，可以使用多個，假設傳入的資料有三個 key，兩個 key 都對應一個 JSON，其中一個是簡單的資料，如下：
+
+```json
+{
+    "item": {
+        "name": "Foo",
+        "description": "The pretender",
+        "price": 42.0,
+        "tax": 3.2
+    },
+    "user": {
+        "username": "dave",
+        "full_name": "Dave Grohl"
+    },
+    "importance": 5
+}
+```
+
+我們可以用兩個 data class 去描述，一個 data class 去描述一個 key 所對應的資料，剩下的則直接用一個參數去接，記得要使用 Annotated，不然會被視為 query parameter。
+
+```python
+from fastapi import FastAPI
+from pydantic import BaseModel
+
+app = FastAPI()
+
+
+class Item(BaseModel):
+    name: str
+    description: str | None = None
+    price: float
+    tax: float | None = None
+
+
+class User(BaseModel):
+    username: str
+    full_name: str | None = None
+
+
+@app.put("/items/{item_id}")
+async def update_item(item_id: int, item: Item, user: User, importance: Annotated[int, Body()]):
+    results = {"item_id": item_id, "item": item, "user": user}
+    return results
+```
+
+這邊有一個有趣的用法，如果你的資料是
+
+```json
+{
+    "item": {
+        "name": "Foo",
+        "description": "The pretender",
+        "price": 42.0,
+        "tax": 3.2
+    }
+}
+```
+
+那可能會這麼設計
+
+```python
+class ItemInner(BaseModel):
+    name: str
+    description: str | None = None
+    price: float
+    tax: float | None = None
+
+class Item(BaseModel):
+    item: ItemInner
+    
+@app.put("/items/{item_id}")
+async def update_item(item_id: int, item: Item):
+    results = {"item_id": item_id, "item": item, "user": user}
+    return results
+```
+
+看起來有夠冗，但透過 `embed` 這個參數，我們可以簡化
+
+```python
+class Item(BaseModel):
+    name: str
+    description: str | None = None
+    price: float
+    tax: float | None = None
+    
+@app.put("/items/{item_id}")
+async def update_item(item_id: int, item: Annotated[Item, Body(embed=True)]):
+    results = {"item_id": item_id, "item": item, "user": user}
+    return results
+```
+
+這些我們就可以把“嵌入”的資料抓出來用 data class 定義，比上面的解法好看很多。
+
+### Fields
+
+前面對於比較大範圍資料的定義，FastAPI 提供很多很有用的工具，而對於小範圍資料的描述，Pydantic 則提供了 `Field()` 這個函數給我們使用。
+
+```python
+from typing import Annotated
+
+from fastapi import Body, FastAPI
+from pydantic import BaseModel, Field
+
+app = FastAPI()
+
+
+class Item(BaseModel):
+    name: str
+    description: str | None = Field(
+        default=None, title="The description of the item", max_length=300
+    )
+    price: float = Field(gt=0, description="The price must be greater than zero")
+    tax: float | None = None
+
+
+@app.put("/items/{item_id}")
+async def update_item(item_id: int, item: Annotated[Item, Body(embed=True)]):
+    results = {"item_id": item_id, "item": item}
+    return results
+```
+
+寫法基本跟 `Path()`、`Query()` 這些 FastAPI 提供的差不多，相當直覺。
+
+### Extra JSON Schema data in Pydantic models
+
+前面已經寫了很多，程式碼方面是定義的清清楚楚，工程師相當快樂，也把 OpenAPI 的網址傳給別人要別人試試看，結果使用者根本不知道怎麼使用，因為沒有範例，我們來看怎麼添加範例。
+
+先來看 pydantic model 怎麼添加，我們透過設定 model_config 這個屬性，並設定其 json_schema_extra 屬性中的 examples 來達成。
+
+```python
+class Item(BaseModel):
+    name: str
+    description: str | None = None
+    price: float
+    tax: float | None = None
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "name": "Foo",
+                    "description": "A very nice Item",
+                    "price": 35.4,
+                    "tax": 3.2,
+                }
+            ]
+        }
+    }
+```
+
+針對 pydantic model 的屬性我們也可以設定
+
+```python
+class Item(BaseModel):
+    name: str = Field(examples=["Foo"])
+    description: str | None = Field(default=None, examples=["A very nice Item"])
+    price: float = Field(examples=[35.4])
+    tax: float | None = Field(default=None, examples=[3.2])
+
+```
+
+FastAPI 提供的 `Body()`、`Path()`、`Query()` 等等也都有提供。
+
+```python
+@app.put("/items/{item_id}")
+async def update_item(
+    item_id: int,
+    item: Annotated[
+        Item,
+        Body(
+            examples=[
+                {
+                    "name": "Foo",
+                    "description": "A very nice Item",
+                    "price": 35.4,
+                    "tax": 3.2,
+                }
+            ],
+        ),
+    ],
+):
+```
+
+不過如果你要設定多個 examples，寫法必須做出一點調整來迎合 OpenAPI，openapi_examples 中的 key 是什麼不太重要，你看得懂就好，重點是裡面必須有三個 key，`summary`、`description`、`value`。
+
+```python
+@app.put("/items/{item_id}")
+async def update_item(
+    *,
+    item_id: int,
+    item: Annotated[
+        Item,
+        Body(
+            openapi_examples={
+                "normal": {
+                    "summary": "A normal example",
+                    "description": "A **normal** item works correctly.",
+                    "value": {
+                        "name": "Foo",
+                        "description": "A very nice Item",
+                        "price": 35.4,
+                        "tax": 3.2,
+                    },
+                },
+                "converted": {
+                    "summary": "An example with converted data",
+                    "description": "FastAPI can convert price `strings` to actual `numbers` automatically",
+                    "value": {
+                        "name": "Bar",
+                        "price": "35.4",
+                    },
+                },
+                "invalid": {
+                    "summary": "Invalid data is rejected with an error",
+                    "value": {
+                        "name": "Baz",
+                        "price": "thirty five point four",
+                    },
+                },
+            },
+        ),
+    ],
+):
+...
+```

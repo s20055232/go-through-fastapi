@@ -527,5 +527,183 @@ async def update_item(
 ```
 
 ## Day5
-https://fastapi.tiangolo.com/tutorial/extra-data-types/
+
+### Extra Data Types
+除了常見的 data types 可以用來對資料進行型態標註並轉型以外，FastAPI 也支援以下幾種：
+
+1. `UUID`: 常用於資料庫，request 跟 response 中是 `str`
+2. `datetime.datetime`: 表示時間，request 跟 response 中是符合國際標準ISO 8601 格式的 `str`，如: `2008-09-15T15:53:00+05:00`
+3. `datetime.date`: 表示日期，request 跟 response 中是符合國際標準ISO 8601 格式的 `str`，如: `2008-09-15`
+4. `datetime.time`: 表示時間，request 跟 response 中是符合國際標準ISO 8601 格式的 `str`，如: `15:53:00.123`
+5. `datetime.timedelta`: 表示時間差，request 跟 response 中是 `float`
+6. `frozenset`: 一般是 list 的形式，輸入時 FastAPI 會去掉重複的元素，輸出時轉型成 list
+7. `bytes`: 二進位，request 跟 response 中是 `str`
+8. `Decimal`: 代表快速且正確捨入的十進制浮點數，request 跟 response 中是 `float`
+
+我們可以透過標注這類特殊型態來轉型 JSON 中的資料，而不是只能使用基本型態定義資料然後再自己轉型，並且這類資料再輸出的時候我們也不用自己轉換回基本型態，FastAPI 會自動幫我們轉型。
+
+以下直接看範例：
+```python
+from datetime import datetime, time, timedelta
+from typing import Annotated
+from uuid import UUID
+
+from fastapi import Body, FastAPI
+
+app = FastAPI()
+
+
+@app.put("/models/{model_id}")
+async def read_items(
+    model_id: UUID,
+    create_datetime: Annotated[datetime, Body()],
+    start_datetime: Annotated[datetime, Body()],
+    process_after: Annotated[timedelta, Body()],
+    repeat_at: Annotated[time | None, Body()] = None,
+    creators: Annotated[frozenset, Body()],
+    model: Annotated[bytes, Body()],
+    price:  Annotated[Decimal, Body()],
+):
+    start_process = start_datetime + process_after
+    duration = end_datetime - start_process
+    return {
+        "model_id": model_id,
+        "start_datetime": start_datetime,
+        "create_datetime": create_datetime,
+        "process_after": process_after,
+        "repeat_at": repeat_at,
+        "start_process": start_process,
+        "duration": duration,
+        "creators": creators,
+        "model": model.decode('utf-8'),
+        "price": float(price)
+    }
+```
+
+### Cookie
+
+Day4 的 Annotated 有提到 `Cookie()`，他的用法跟 `Path()`、`Query()` 一樣，但他獲取的資料不太一樣，HTTP 中 Headers 中有 Cookie 來存放相關的 Cookies（即使多次發送和接收仍保持不變的資料），我們用 amazon.com 為例，點進去點開開發者工具之後馬上會看到 Headers 裡面有 Cookie，而且是一堆，要將這些資料取出，FastAPI 提供 `Cookie()` 讓我們可以取出並使用。
+
+![alt text](images/image.png)
+
+```python
+from typing import Annotated
+
+from fastapi import Cookie, FastAPI
+
+app = FastAPI()
+
+
+@app.get("/items/")
+async def read_items(ads_id: Annotated[str | None, Cookie()] = None):
+    return {"ads_id": ads_id}
+```
+
+### Header
+Cookie 是比較特別的存在，但 HTTP 的Header 中還有一堆資訊可以使用，FastAPI 提供 `Header()` 來讓我們讀取這些資料，透過設定同名的參數名稱來讀取該 Header
+
+```python
+@app.get("/items/")
+async def read_items(user_agent: Annotated[str | None, Header()] = None):
+    return {"User-Agent": user_agent}
+```
+
+但因為 `-` 在 Python 中是不能用來取變數名稱的，所以 FastAPI 會自動幫你把你的變數名稱的 `-` 視為 `_`，並且因為 HTTP 的 headers 無視大小寫，所以你的變數名稱不需要跟著調整。
+
+如果想要關閉 `-` 視為 `_` 的轉換的話，可以使用 `convert_underscore` 這個參數。
+
+```python
+@app.get("/items/")
+async def read_items(
+    strange_header: Annotated[str | None, Header(convert_underscores=False)] = None,
+):
+    return {"strange_header": strange_header}
+```
+
+至於重複的 Headers，FastAPI 可以幫你把重複的都集合在一起成一個 list。
+
+```python
+@app.get("/items/")
+async def read_items(x_token: Annotated[list[str] | None, Header()] = None):
+    return {"X-Token values": x_token}
+```
+
+### Response Model
+前面使用 data type 都是輸入資料的轉型以及驗證，但對於輸出的資料也可以進行轉型跟驗證，直接看範例
+
+```python
+class Item(BaseModel):
+    name: str
+    description: str | None = None
+    price: float
+    tax: float | None = None
+    tags: list[str] = []
+
+
+@app.post("/items/", response_model=Item)
+async def create_item(item: Item) -> Any:
+    return item
+
+```
+
+重複的欄位可以透過繼承來避免重複設定
+
+```python
+class BaseUser(BaseModel):
+    username: str
+    email: EmailStr
+    full_name: str | None = None
+
+
+class UserIn(BaseUser):
+    password: str
+```
+
+有預設值並且沒有被設定的欄位可以忽視
+
+```python
+class Item(BaseModel):
+    name: str
+    description: str | None = None
+    price: float
+    tax: float = 10.5
+    tags: list[str] = []
+
+@app.get("/items/{item_id}", response_model=Item, response_model_exclude_unset=True)
+async def read_item(item_id: str):
+    return items[item_id]
+```
+
+就是想要忽略某些欄位可以使用 `response_model_exclude`，就是想要回傳某些欄位可以使用 `response_model_include`。
+
+### Status Code
+
+直接 hard code status code 最怕打錯以及忘記 status code 是什麼然後到處查，比較好的做法是使用 FastAPI 已經預先定義好的狀態碼。
+
+```python
+from fastapi import FastAPI, status
+
+app = FastAPI()
+
+
+@app.post("/items/", status_code=status.HTTP_201_CREATED)
+async def create_item(name: str):
+    return {"name": name}
+```
+
+### Form data
+
+前面有說到使用 JSON 傳遞資料，但要傳遞 key-value 的資料，我們也可以使用 `Form()`，不過每個 key 都必須定義一個相對應的參數去接收，而無法像 JSON 那樣直接用一個 Pydantic model 來接收整包資料。看以下範例：
+
+```python
+@app.post("/login/")
+async def login(username: Annotated[str, Form()], password: Annotated[str, Form()]):
+    return {"username": username}
+```
+
+`Form()` 的使用方式就跟 `Query()`、`Path()` 等等都一樣。
+
+Form 跟 JSON 兩者是不能混用的，這跟 HTTP 的規範有關，Form 使用的 `media type` 是 `application/x-www-form-urlencoded` 或 `multipart/form-data`(有 files，因為 file 需要拆分成多個部分傳遞)，而 JSON 是使用 `application/json`。
+
+## Day6
 continue

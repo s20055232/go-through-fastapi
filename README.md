@@ -705,5 +705,98 @@ async def login(username: Annotated[str, Form()], password: Annotated[str, Form(
 
 Form 跟 JSON 兩者是不能混用的，這跟 HTTP 的規範有關，Form 使用的 `media type` 是 `application/x-www-form-urlencoded` 或 `multipart/form-data`(有 files，因為 file 需要拆分成多個部分傳遞)，而 JSON 是使用 `application/json`。
 
+還有就是 `multipart/form-data` 的 file 會以二進位的方式傳遞，而不是純文本資料。
+
 ## Day6
-continue
+前面有提到 file 會以 form-data 形式傳遞，雖然都是接受 file，但 FastAPI 提供兩種方式來讀取上傳的 file，首先是 `File()`，我們一樣用 `Annotated` 來標注資料，data type 設定為 `bytes`，用這種方式得到的資料會被完整儲存在記憶體裡面，適合小資料。
+
+```python
+@app.post("/files/")
+async def create_file(file: Annotated[bytes, File()]):
+    return {"file_size": len(file)}
+```
+
+另一種方式是 `UploadFile`，這種方式有更多額外的好處
+1. 不需要 default value（就是前面看到 Annotated 後面放置的 `File()`）
+2. 不會全部放置到記憶體，而是排存(spool)於記憶體，有一個上限，每次接受到上限之後會先將資料寫入到 Disk 之後再繼續接收資料
+3. 有 metadata 提供額外的資訊
+4. 有 file-like（提供 `read()`、`write()` 這類 file 常見的操作）的 `async` 介面
+5. 背後有一個實際的 `SpooledTemporaryFile`，代表其他套件如果需要 file-like 物件的，你也可以直接使用無縫接軌
+
+`UploadFile` 的特性讓他相當適合處理大資料（圖片、影片、BLOB 等等），除了不會把記憶體塞爆，也不會頻繁的（如果你的 buffer 很大）呼叫 I/O 寫入，相當有效率。
+
+```python
+@app.post("/uploadfile/")
+async def create_upload_file(file: UploadFile):
+    return {"filename": file.filename}
+```
+
+那問題就來了，我幹嘛使用 File? UploadFile 不是更好嗎? 我認為使用哪個主要考慮“資料大小”跟“資料操作”，資料小用 File 直接內存讀取然後進行即時的資料操作，輕鬆又簡單，資料大的話就必須使用 UploadFile 分批寫入，要對資料進行操作就必須等資料完整儲存之後再讀取進行操作。
+
+前面有提到 metadata，就是描述資料的資料，而這些資料都被記錄在 `UploadFile` 這個物件的屬性底下
+1. `filename`: 上傳資料的原始名稱(`str`)(e.g. `image.jpg`)
+2. `content-type`: 上傳資料的內容格式(`str`)(e.g. `image/jpeg`)，這個資訊會定義在 HTTP 的 Header 中
+3. `file`: 一個 `SpooledTemporaryFile`
+
+接著說明前面提到 `async` 的介面，這些行為都是基於 Python 原生的 `SpooledTemporaryFile` 的行為，但變成非同步版本的，有以下：
+1. `read(size)`: 從 file 當中讀取 `size`(`int`) 的 bytes/characters
+2. `write(data)`: 將 data(`str` or `bytes`) 寫入到 file 中
+3. `seek(offset)`: 前往 file 中的 byte position
+4. `close()`: 關閉 file（清除並關閉這個串流）
+
+有人可能會對 read size 跟 seek offset 感到疑惑，下面舉幾個實際的場景:
+- `seek`: 這在重複讀取資料很有效，因為當你 `read` 資料之後，如果有完整讀取，指標會跑到文件的最尾端，這時候我們可以 `seek(0)` 將指標移動回最開始的位置，然後呼叫 `read` 再次讀取。
+- `read`: 如果你只想要接受特定類型的資料，可以不用在完整接收使用者的資料之後再判斷是否合法，可以透過讀取資料的前幾個字節(Magic Number)來查看是否符合，如：`read(8)`。[Magic Number](https://en.wikipedia.org/wiki/Magic_number_(programming)#In_files) 是透過在檔案開頭添加數個 bytes 來代表自身的檔案類型。
+
+來看一個 `async` 的使用方式
+
+```python
+contents = await myfile.read()
+```
+
+非常簡單，就是加上 `await`，代表這邊需要“等一下”，此時這個任務會由 FastAPI 交由背景的 threadpool 去執行。
+
+而一般的使用方式為，我們不能直接使用 `myfile`，因為他的方法是非同步的，我們要用其底層的 `SpooledTemporaryFile`，所以是 `myfile.file`
+
+```python
+contents = myfile.file.read()
+```
+
+直得留意的是 file 也是可以為空的，而且也可以添加額外的 metadata 就跟前面的 `Path()`、`Query()` 一樣
+
+```python
+@app.post("/files/")
+async def create_file(file: Annotated[Union[bytes, None], File()] = None):
+    if not file:
+        return {"message": "No file sent"}
+    else:
+        return {"file_size": len(file)}
+```
+
+多個上傳資料也是可以的，將型態標註為 list 即可，metadata 使用方式則一樣
+
+```python
+@app.post("/uploadfiles/")
+async def create_upload_files(files: list[UploadFile], File(description="Multiple files as UploadFile")):
+    return {"filenames": [file.filename for file in files]}
+```
+
+同時接受 Form 跟 File 也是可行的（畢竟 Form 跟 File 是同一個 content-type），File 也可以多份，不過是不同參數名稱去對應
+
+```python
+@app.post("/files/")
+async def create_file(
+    file: Annotated[bytes, File()],
+    fileb: Annotated[UploadFile, File()],
+    token: Annotated[str, Form()],
+):
+    return {
+        "file_size": len(file),
+        "token": token,
+        "fileb_content_type": fileb.content_type,
+    }
+```
+
+而一個參數接受一個文件、一個參數接收多個文件兩者最大的差異在“如何對待這些資料”
+- 一對多: 我可以假設這些資料的樣式應該一樣，所以會用同一個方式對待他們，通常用於批量處理相同資料
+- 一對一: 這些資料的樣式應該不一樣，我會根據不同文件用不同方式處理，通常用於資料格式不同時

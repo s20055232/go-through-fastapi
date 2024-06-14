@@ -800,3 +800,236 @@ async def create_file(
 而一個參數接受一個文件、一個參數接收多個文件兩者最大的差異在“如何對待這些資料”
 - 一對多: 我可以假設這些資料的樣式應該一樣，所以會用同一個方式對待他們，通常用於批量處理相同資料
 - 一對一: 這些資料的樣式應該不一樣，我會根據不同文件用不同方式處理，通常用於資料格式不同時
+
+## Day7
+在 FastAPI 中要回傳錯誤，就是 Status Code 404、500 這類錯誤，我們要使用 `HTTPException` 來回傳，並在其中定義錯誤的 Status Code 跟 detail，detail 的部分除了 str 之外也是可以使用 JSON 可解析的內容，相當方便！
+
+```python
+from fastapi import FastAPI, HTTPException
+
+app = FastAPI()
+
+items = {"foo": "The Foo Wrestlers"}
+
+
+@app.get("/items/{item_id}")
+async def read_item(item_id: str):
+    if item_id not in items:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return {"item": items[item_id]}
+```
+
+這邊可以發現我們不是使用 return 去傳遞錯誤，還是透過 raise 去觸發，更有錯誤的感覺，我自己滿喜歡這個方式的，不過這個設計當然也有其他的考量，後面會提到。
+
+除了 status code 跟 detail 以外，我們還可以添加屬於我們自己的 headers
+
+```python
+@app.get("/items-header/{item_id}")
+async def read_item_header(item_id: str):
+    if item_id not in items:
+        raise HTTPException(
+            status_code=404,
+            detail="Item not found",
+            headers={"X-Error": "There goes my error"},
+        )
+    return {"item": items[item_id]}
+```
+
+可能會有人疑惑為什麼要用 “X-” 開頭，這是一種慣例，通常自定義的 headers 大家會用 "X-" 開頭，但這種慣例已經被建議不要這麼做了([出處](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers))，取而代之，不要使用前綴且使用有意義的文字去表示會比較好。
+
+> Custom proprietary headers can be added using the 'X-' prefix, but this convention was deprecated in June 2012, because of the inconveniences it caused when non-standard fields became standard in RFC 6648 - Deprecating the "X-" Prefix and Similar Constructs in Application Protocols
+
+除了使用 FastAPI 提供的 `HTTPException`，我們還可以自定義例外，這邊比較複雜，稍微說明一下。
+在我們的 handler 中我們可以直接“拋出”我們自定義的例外，這個例外 FastAPI 是不知道要怎麼解析的，所以我們要告訴 FastAPI 這個例外要怎麼處理，因此要使用 `exception_handler` 去註冊這個例外後續的處理動作，至於回傳的內容，因為我們是自行處理，所以可以更有彈性的使用 `JSONResponse` 去回傳一般的 response，當然，你在自定義的行為裡面不想要用 `JSONResponse` 繼續使用 `HTTPException` 也可以，並沒有限制說自定義例外不能使用 `HTTPException` 。
+
+```python
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+
+
+class UnicornException(Exception):
+    def __init__(self, name: str):
+        self.name = name
+
+
+app = FastAPI()
+
+
+@app.exception_handler(UnicornException)
+async def unicorn_exception_handler(request: Request, exc: UnicornException):
+    return JSONResponse(
+        status_code=418,
+        content={"message": f"Oops! {exc.name} did something. There goes a rainbow..."},
+    )
+
+
+@app.get("/unicorns/{name}")
+async def read_unicorn(name: str):
+    if name == "yolo":
+        raise UnicornException(name=name)
+    return {"unicorn_name": name}
+```
+
+自定義的 Exception 在處理 I18N 的時候特別好用，對於後端來說就是針對特定的問題 raise 特定的 Exception，然後將這些 Exception 都註冊到 FastAPI 上，當觸發時給予特定的參數 --> 觸發特定的例外 --> 回傳特定的訊息，就是那麼流暢。
+
+## Day8
+今天來看一下怎麼把 API 文件寫得更好，讓客戶變得更加滿意！ 首先是 StatusCode，雖然我們可以直接使用 404、204 等等，但這樣其實不太好，第一是你有可能腦霧打錯，第二是如果你忘記 404 在做什麼，你還要上網去查，但 FastAPI 很貼心有提供 StatusCode 的常數給我們使用
+
+```python
+from fastapi import FastAPI, status
+from pydantic import BaseModel
+
+app = FastAPI()
+
+
+class Item(BaseModel):
+    name: str
+    description: str | None = None
+    price: float
+    tax: float | None = None
+    tags: set[str] = set()
+
+
+@app.post("/items/", response_model=Item, status_code=status.HTTP_201_CREATED)
+async def create_item(item: Item):
+    return item
+```
+
+做到善用 StatusCode 還不夠，下一步使用者會要求說你們可不可以把 API 分一下類，這樣我們比較容易使用，當然，使用者是上帝，我們立刻來處理。對於這種需求，我們可以使用 `tag` 將相關連的標注在同一個類別。
+
+```python
+from fastapi import FastAPI
+from pydantic import BaseModel
+
+app = FastAPI()
+
+
+class Item(BaseModel):
+    name: str
+    description: str | None = None
+    price: float
+    tax: float | None = None
+    tags: set[str] = set()
+
+
+@app.post("/items/", response_model=Item, tags=["items"])
+async def create_item(item: Item):
+    return item
+
+
+@app.get("/items/", tags=["items"])
+async def read_items():
+    return [{"name": "Foo", "price": 42}]
+
+
+@app.get("/users/", tags=["users"])
+async def read_users():
+    return [{"username": "johndoe"}]
+```
+
+對於外部需求我們做到的，但對於內部需求，同事會問說可不可以將有哪些類別整理一下列出來，不然要歸類時找不到，當然，當個好同事很重要，我們也可以透過 `Enum` 來整理。
+
+```python
+from enum import Enum
+
+from fastapi import FastAPI
+
+app = FastAPI()
+
+
+class Tags(Enum):
+    items = "items"
+    users = "users"
+
+
+@app.get("/items/", tags=[Tags.items])
+async def get_items():
+    return ["Portal gun", "Plumbus"]
+
+
+@app.get("/users/", tags=[Tags.users])
+async def read_users():
+    return ["Rick", "Morty"]
+```
+
+恭喜，到這邊你將 API 分門別類整理乾淨了，但使用者依然不滿意，他們想要知道更多 API 的資訊，好吧，那我們就加上 `summary` 跟 `description` 吧，FastAPI 也都想到了，都有提供對應的功能給我們使用。
+
+```python
+from fastapi import FastAPI
+from pydantic import BaseModel
+
+app = FastAPI()
+
+
+class Item(BaseModel):
+    name: str
+    description: str | None = None
+    price: float
+    tax: float | None = None
+    tags: set[str] = set()
+
+
+@app.post(
+    "/items/",
+    response_model=Item,
+    summary="Create an item",
+    description="Create an item with all the information, name, description, price, tax and a set of unique tags",
+)
+async def create_item(item: Item):
+    return item
+```
+
+使用者是滿意了，但又換同事不滿意了，他們說 `description` 這樣寫不好看，如果文字很多的話格式會跑掉，但又不想要將文字另外儲存成變數或讀取外部文件來處理大量的描述，還好，我們不用自行處理這個問題，FastAPI 有將 docstring 轉換成  `description` 的功能，而且還支援 markdown！
+
+```python
+from fastapi import FastAPI
+from pydantic import BaseModel
+
+app = FastAPI()
+
+
+class Item(BaseModel):
+    name: str
+    description: str | None = None
+    price: float
+    tax: float | None = None
+    tags: set[str] = set()
+
+
+@app.post(
+    "/items/",
+    response_model=Item,
+    summary="Create an item",
+    response_description="The created item",
+)
+async def create_item(item: Item):
+    """
+    Create an item with all the information:
+
+    - **name**: each item must have a name
+    - **description**: a long description
+    - **price**: required
+    - **tax**: if the item doesn't have tax, you can omit this
+    - **tags**: a set of unique tag strings for this item
+    """
+    return item
+```
+
+到這邊是終於告一個段落，使用者繼續變多，工程師也持續開發，但隨著時間過去，我們遇到一個問題， API 要停止支援了！ 天底下沒有不散的宴席，這很正常，有些過時的 API 勢必要淘汰，但怎麼跟使用者說呢？ 總不能每個人都發公告吧？ FastAPI 再次貼心的解決這個問題，它有提供 `deprecated` 這個功能
+
+```python
+from fastapi import FastAPI
+
+app = FastAPI()
+
+@app.get("/users/", tags=["users"])
+async def read_users():
+    return [{"username": "johndoe"}]
+
+
+@app.get("/elements/", tags=["items"], deprecated=True)
+async def read_elements():
+    return [{"item_id": "Foo"}]
+```
+
+透過這個功能，使用者會在 OpenAPI 上看到這個 API 變成灰色的，意味著這個 API 已經不建議使用、不支援了，透過這個方式，我們持續的跟使用者保持良好的互動，大家繼續快樂的開發～～
